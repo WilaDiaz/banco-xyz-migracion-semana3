@@ -1,124 +1,387 @@
-Sistema de Migracion Batch - Banco XYZ
-1. Descripcion General del Proyecto
-Modernizacion del sistema legacy del Banco XYZ mediante Spring Boot 3 y Spring Batch 5. La solucion procesa, valida y migra datos historicos distribuidos en archivos CSV hacia un modelo relacional en MySQL, garantizando integridad referencial, alta concurrencia y resiliencia ante errores de entrada.
+# Sistema de Migración Batch - Banco XYZ
 
-2. Procesos Batch Implementados
-Proceso 1: Reporte de Transacciones Diarias (transaccionesJob)
+## 1. Descripción del proyecto
 
-Lee transacciones.csv.
+Proyecto desarrollado para Banco XYZ utilizando **Java 17, Spring Boot 3 y Spring Batch 5**, cuyo objetivo es optimizar la migración y procesamiento de información bancaria proveniente de archivos CSV hacia una base de datos relacional MySQL.
 
-Detecta anomalias de negocio asociadas a montos cero o negativos y clasifica cada transaccion como VALIDA, ANOMALIA_MONTO_CERO o ANOMALIA_MONTO_NEGATIVO.
+La solución implementa tres procesos Batch independientes para:
 
-Persiste los registros en la tabla reporte_transacciones.
+- Procesamiento de transacciones diarias.
+- Cálculo de intereses.
+- Generación y consolidación de estados de cuenta anuales.
 
-Proceso 2: Calculo de Intereses Mensuales (interesesJob)
 
-Lee intereses.csv.
+El proyecto incorpora validación y transformación de datos, detección de anomalías, tolerancia a fallos, políticas de Skip y Retry, procesamiento multihilo y parametrización de la configuración Batch.
 
-Valida coherencia de datos (edad minima laboral y saldos no negativos) y calcula la rentabilidad o costo financiero mensual segun el producto (ahorro, prestamo, hipoteca).
+---
 
-Persiste los registros en la tabla intereses_calculados.
+## 2. Tecnologías utilizadas
 
-Proceso 3: Generacion de Estados de Cuenta Anuales (cuentasAnualesJob)
+- Java 17
+- Spring Boot 3
+- Spring Batch 5
+- Spring Data JPA
+- Hibernate
+- MySQL 8
+- Maven
+- Git / GitHub
 
-Lee cuentas_anuales.csv.
+---
 
-Clasifica los movimientos anuales para fines de auditoria como INGRESO, EGRESO o MONTO_NULO, segun el valor del monto procesado.
+## 3. Estructura del proyecto
 
-Persiste los registros en la tabla estados_cuenta_anual.
+El proyecto utiliza el paquete base:
 
-3. Arquitectura y Optimizaciones (Semana 2)
-Escalamiento Multihilo:
+`cl.duoc.bancoxyz`
 
-Implementacion de ThreadPoolTaskExecutor configurado con 3 hilos paralelos (setCorePoolSize(3), setMaxPoolSize(3)).
+La aplicación se encuentra organizada principalmente en:
 
-Procesamiento por lotes en chunks de tamano 5 (.chunk(5, transactionManager)).
+- `config/`: configuración de los Jobs, Steps y procesamiento multihilo.
+- `dto/`: objetos utilizados para la lectura de los archivos CSV.
+- `model/`: entidades persistidas en MySQL.
+- `processor/`: validación, transformación y detección de anomalías.
+- `repository/`: repositorios Spring Data JPA.
+- `policy/`: políticas personalizadas `CustomSkipPolicy` y `CustomRetryPolicy`.
+- `util/`: utilidades para normalización y procesamiento de fechas.
+- `resources/data/`: archivos CSV utilizados como fuente de información.
 
-Thread-Safety en Lectura:
+---
 
-Envoltura de FlatFileItemReader con SynchronizedItemStreamReader para asegurar la sincronizacion de lectura y evitar condiciones de carrera entre hilos concurrentes.
+## 4. Procesos Batch implementados
 
-Tolerancia a Fallos y Reintentos:
+### 4.1. Job de transacciones diarias
 
-CustomSkipPolicy: Politica personalizada que tolera hasta 5 registros con errores de casteo o parseo (FlatFileParseException, NumberFormatException) sin abortar el proceso.
+**Job:** `transaccionesJob`
 
-CustomRetryPolicy: Manejo de hasta 3 reintentos ante excepciones transitorias de conexion o bloqueos en base de datos.
+Procesa el archivo:
 
-4. Estructura del Proyecto
-Plaintext
-banco-xyz-migracion/
-├── src/main/java/cl/duoc/bancoxyz/
-│   ├── BancoXyzApplication.java
-│   ├── config/
-│   │   ├── BatchConfig.java
-│   │   ├── TransaccionesJobConfig.java
-│   │   ├── InteresesJobConfig.java
-│   │   └── CuentasAnualesJobConfig.java
-│   ├── dto/
-│   │   ├── TransaccionDTO.java
-│   │   ├── InteresDTO.java
-│   │   └── CuentaAnualDTO.java
-│   ├── model/
-│   │   ├── Transaccion.java
-│   │   ├── InteresCuenta.java
-│   │   └── CuentaAnual.java
-│   ├── policy/
-│   │   ├── CustomSkipPolicy.java
-│   │   └── CustomRetryPolicy.java
-│   ├── processor/
-│   │   ├── TransaccionProcessor.java
-│   │   ├── InteresProcessor.java
-│   │   └── CuentaAnualProcessor.java
-│   └── repository/
-│       ├── TransaccionRepository.java
-│       ├── InteresCuentaRepository.java
-│       └── CuentaAnualRepository.java
-├── src/main/resources/
-│   ├── data/
-│   │   ├── transacciones.csv
-│   │   ├── intereses.csv
-│   │   └── cuentas_anuales.csv
-│   └── application.properties
-└── pom.xml
-5. Requisitos de Entorno
-Java Development Kit (JDK) 17 o superior.
+`src/main/resources/data/transacciones.csv`
 
-Apache Maven 3.9+.
+El proceso realiza:
 
-MySQL Server 8.0+.
+1. Lectura de las transacciones desde CSV.
+2. Validación y normalización de los datos.
+3. Normalización de diferentes formatos de fecha.
+4. Detección de montos negativos.
+5. Detección de montos iguales a cero.
+6. Identificación de tipos de transacción inválidos.
+7. Persistencia del resultado en MySQL.
 
-6. Configuracion y Base de Datos
-Crea la base de datos previa ejecucion:
+Los registros son clasificados mediante estados como:
 
-SQL
-CREATE DATABASE IF NOT EXISTS banco_xyz_batch;
-Ajusta tus credenciales en src/main/resources/application.properties o mediante variables de entorno:
+- `VALIDA`
+- `ANOMALIA_MONTO_NEGATIVO`
+- `ANOMALIA_MONTO_CERO`
+- `ANOMALIA_TIPO_INVALIDO`
 
-Properties
-spring.datasource.url=jdbc:mysql://localhost:${DB_PORT:3306}/banco_xyz_batch?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-spring.datasource.username=${DB_USER:root}
-spring.datasource.password=${DB_PASSWORD:root1234}
-spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+Los registros con datos que no pueden ser procesados de forma segura son controlados mediante la política de tolerancia a fallos.
 
-spring.jpa.hibernate.ddl-auto=update
-spring.jpa.show-sql=true
+---
 
-spring.batch.jdbc.initialize-schema=always
-spring.batch.job.enabled=false
+### 4.2. Job de cálculo de intereses
 
-7. Instrucciones de Compilacion y Ejecucion
-Situarse en la raiz del proyecto Maven:
+**Job:** `interesesJob`
 
-PowerShell
-cd banco-xyz-migracion
-Compilar y ejecutar la aplicacion:
+Procesa el archivo:
 
-PowerShell
-mvn clean spring-boot:run
-Verificar los datos persistidos en MySQL:
+`src/main/resources/data/intereses.csv`
 
-SQL
-USE banco_xyz_batch;
-SELECT * FROM reporte_transacciones;
-SELECT * FROM intereses_calculados;
-SELECT * FROM estados_cuenta_anual;
+El proceso valida los datos de cada cuenta y calcula el interés correspondiente de acuerdo con su tipo.
+
+Tasas utilizadas:
+
+| Tipo de cuenta | Tasa |
+|---|---:|
+| Ahorro | 5% |
+| Préstamo | 8% |
+| Hipoteca | 3,5% |
+
+Para cada registro se almacenan datos como:
+
+- ID de cuenta.
+- Nombre.
+- Edad.
+- Tipo.
+- Saldo inicial.
+- Tasa aplicada.
+- Interés calculado.
+- Saldo final.
+
+Los resultados son almacenados en la tabla:
+
+`intereses_calculados`
+
+---
+
+### 4.3. Job de estados de cuenta anuales
+
+**Job:** `cuentasAnualesJob`
+
+Procesa el archivo:
+
+`src/main/resources/data/cuentas_anuales.csv`
+
+Este Job utiliza múltiples Steps para procesar y consolidar la información anual.
+
+#### Step 1 - Limpieza
+
+Antes de una nueva ejecución se eliminan los datos anuales generados anteriormente, evitando que las reejecuciones acumulen resultados duplicados.
+
+#### Step 2 - Procesamiento
+
+Se realiza:
+
+- Lectura del archivo CSV.
+- Normalización de fechas.
+- Validación de movimientos.
+- Clasificación de auditoría.
+- Persistencia de los movimientos procesados.
+
+Las clasificaciones incluyen:
+
+- `INGRESO`
+- `EGRESO`
+- `MONTO_NULO`
+
+#### Step 3 - Consolidación anual
+
+Los movimientos son agrupados por:
+
+- Cuenta.
+- Año.
+
+Para cada cuenta se calcula:
+
+- Cantidad de movimientos.
+- Total de ingresos.
+- Total de egresos.
+- Saldo anual.
+
+Los resultados consolidados son almacenados en:
+
+`estado_cuenta_resumen`
+
+Esto permite generar un estado anual detallado y auditable para cada cuenta.
+
+---
+
+## 5. Normalización y validación de datos
+
+Debido a que los archivos de origen pueden contener información inconsistente, se implementaron validaciones para controlar registros incorrectos.
+
+Entre los casos considerados se encuentran:
+
+- Fechas en distintos formatos.
+- Fechas inválidas.
+- Montos negativos.
+- Montos iguales a cero.
+- Valores nulos.
+- Tipos de transacción inválidos.
+- Datos numéricos incorrectos.
+
+La utilidad `DateParserUtil` permite normalizar los formatos de fecha aceptados antes de persistir la información.
+
+Cuando un registro contiene una fecha imposible, por ejemplo:
+
+`2024-13-01`
+
+el registro es omitido mediante la política de tolerancia a fallos sin detener la ejecución completa del Job.
+
+---
+
+## 6. Tolerancia a fallos
+
+La solución utiliza las capacidades de Fault Tolerance de Spring Batch mediante políticas personalizadas.
+
+### CustomSkipPolicy
+
+`CustomSkipPolicy` permite omitir registros defectuosos sin detener completamente el procesamiento Batch.
+
+El límite de registros omitidos se encuentra parametrizado mediante:
+
+```properties
+batch.skip-limit=5
+```
+
+De esta forma, errores controlados en registros individuales no provocan inmediatamente la interrupción de todo el proceso.
+
+### CustomRetryPolicy
+
+`CustomRetryPolicy` permite reintentar operaciones cuando se producen errores transitorios relacionados con el acceso a datos o la base de datos.
+
+La cantidad de reintentos se encuentra configurada mediante:
+
+```properties
+batch.retry-limit=3
+```
+
+Esto mejora la resiliencia de los procesos frente a fallos temporales.
+
+---
+
+## 7. Escalamiento y procesamiento multihilo
+
+Para mejorar el rendimiento de los Jobs se implementó un `ThreadPoolTaskExecutor`.
+
+Los parámetros de concurrencia se encuentran externalizados en `application.properties`, permitiendo modificar la configuración sin alterar el código fuente.
+
+La configuración seleccionada utiliza:
+
+```properties
+batch.chunk-size=5
+batch.threads.core=5
+batch.threads.max=5
+batch.queue-capacity=15
+batch.skip-limit=5
+batch.retry-limit=3
+```
+
+Durante las pruebas se evaluaron diferentes configuraciones de cantidad de hilos.
+
+| Configuración | Transacciones | Intereses | Estados anuales | Tiempo total |
+|---|---:|---:|---:|---:|
+| 1 hilo | 180 ms | 110 ms | 527 ms | 817 ms |
+| 3 hilos | 186 ms | 104 ms | 410 ms | 700 ms |
+| 5 hilos | 294 ms | 88 ms | 244 ms | 626 ms |
+
+La configuración de **5 hilos** obtuvo el menor tiempo global de ejecución, con aproximadamente **626 ms** en las pruebas comparativas.
+
+Aunque el Job de transacciones presentó un aumento individual de tiempo debido al overhead asociado a la concurrencia, los Jobs de intereses y estados anuales mejoraron su rendimiento, obteniéndose el mejor resultado global con 5 hilos.
+
+Por este motivo se seleccionó esta configuración como alternativa final.
+
+---
+
+## 8. Estrategia de reejecución
+
+Los Jobs son ejecutados utilizando parámetros dinámicos, permitiendo generar nuevas instancias de ejecución en Spring Batch.
+
+La aplicación utiliza un parámetro basado en timestamp para diferenciar cada ejecución.
+
+Esto permite ejecutar nuevamente los procesos sin producir conflictos por una instancia de Job previamente completada.
+
+Adicionalmente, el procesamiento de estados anuales incorpora un Step de limpieza previo para evitar la acumulación de resultados consolidados entre ejecuciones.
+
+---
+
+## 9. Base de datos
+
+El proyecto utiliza MySQL.
+
+Base de datos utilizada:
+
+`banco_xyz_batch`
+
+Entre las tablas generadas por el proyecto se encuentran:
+
+- `reporte_transacciones`
+- `intereses_calculados`
+- `estados_cuenta_anual`
+- `estado_cuenta_resumen`
+
+Spring Batch también genera sus tablas internas para administrar Jobs, Steps y ejecuciones.
+
+---
+
+## 10. Configuración de conexión
+
+La aplicación permite configurar la conexión mediante variables de entorno.
+
+Ejemplo en PowerShell:
+
+```powershell
+$env:DB_PORT="3307"
+$env:DB_USER="root"
+$env:DB_PASSWORD="TU_CONTRASEÑA_MYSQL"
+```
+
+Posteriormente se puede ejecutar el proyecto con:
+
+```powershell
+.\mvnw.cmd spring-boot:run
+```
+
+La contraseña de MySQL no debe almacenarse directamente en el repositorio.
+
+---
+
+## 11. Compilación del proyecto
+
+Para verificar la compilación:
+
+```powershell
+.\mvnw.cmd clean compile
+```
+
+Una compilación correcta debe finalizar con:
+
+```text
+BUILD SUCCESS
+```
+
+---
+
+## 12. Ejecución
+
+Al ejecutar la aplicación se procesan secuencialmente los tres Jobs:
+
+```text
+PROCESO 1: TRANSACCIONES DIARIAS
+PROCESO 2: CALCULO DE INTERESES
+PROCESO 3: ESTADOS DE CUENTA
+```
+
+Cada Job registra en consola su inicio, término, estado y duración.
+
+Una ejecución correcta finaliza con los Jobs en estado:
+
+`COMPLETED`
+
+y con el mensaje final correspondiente a la migración Batch completada exitosamente.
+
+---
+
+## 13. Resultados obtenidos
+
+### Transacciones
+
+La información procesada permite distinguir transacciones válidas y anomalías como:
+
+- Montos negativos.
+- Montos cero.
+- Tipos de transacción inválidos.
+
+### Intereses
+
+Se almacenan los intereses calculados junto con la tasa aplicada, saldo inicial y saldo final de cada cuenta.
+
+### Estados anuales
+
+Se genera una consolidación por cuenta y año que incluye:
+
+- Cantidad de movimientos.
+- Total de ingresos.
+- Total de egresos.
+- Saldo anual.
+
+Esto permite obtener información resumida y auditable a partir de los movimientos procesados.
+
+---
+
+## 14. Conclusión
+
+La solución desarrollada permite realizar la migración y procesamiento de datos bancarios mediante Spring Batch, incorporando mecanismos orientados a mejorar la integridad, rendimiento y resiliencia del proceso.
+
+La implementación de validaciones, normalización de datos, políticas de Skip y Retry permite controlar registros defectuosos y fallos transitorios sin comprometer innecesariamente la ejecución completa.
+
+Asimismo, las pruebas de escalamiento permitieron comparar diferentes configuraciones de concurrencia, seleccionándose una configuración de 5 hilos por presentar el mejor tiempo global entre los escenarios evaluados.
+
+Finalmente, la consolidación de estados de cuenta permite agrupar los movimientos por cuenta y año, generando información detallada de ingresos, egresos, saldo y cantidad de movimientos para facilitar la auditoría de los datos migrados.
+
+---
+
+## Autor
+
+**Wilangely Diaz**
+
+Proyecto desarrollado para la asignatura **Desarrollo Backend III - Semana 3**.
